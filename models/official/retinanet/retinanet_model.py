@@ -465,6 +465,8 @@ def _model_fn(features, labels, mode, params, model, variable_filter_fn=None):
         'groundtruth_data': labels['groundtruth_data'],
         'image_scales': labels['image_scales'],
     }
+    tf.logging.info("cls_outputs: {}".format(cls_outputs))
+    tf.logging.info("box_outputs: {}".format(box_outputs))
     add_metric_fn_inputs(params, cls_outputs, box_outputs, metric_fn_inputs)
     eval_metrics = (metric_fn, metric_fn_inputs)
 
