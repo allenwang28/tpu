@@ -335,6 +335,58 @@ def main(argv):
             serving_input_receiver_fn=
             lambda: serving_input_fn(hparams.image_size))
 
+  elif FLAGS.mode == 'predict':
+    predict_params = dict(
+        params,
+        use_tpu=False,
+        input_rand_hflip=False,
+        resnet_checkpoint=None,
+        is_training_bn=False,
+        use_bfloat16=False,
+    )
+
+    predict_estimator = tf.contrib.tpu.TPUEstimator(
+        model_fn=retinanet_model.retinanet_model_fn,
+        use_tpu=False,
+        train_batch_size=FLAGS.train_batch_size,
+        predict_batch_size=FLAGS.predict_batch_size,
+        config=run_config,
+        predict_batch_size=16,
+        params=predict_params)
+
+    def terminate_predict():
+      tf.logging.info('Terminating predict after %d seconds of no checkpoints' %
+                      FLAGS.predict_timeout)
+      return True
+
+    # Run prediction when there's a new checkpoint
+    for ckpt in tf.contrib.training.checkpoints_iterator(
+        FLAGS.model_dir,
+        min_interval_secs=FLAGS.min_predict_interval,
+        timeout=FLAGS.predict_timeout,
+        timeout_fn=terminate_predict):
+
+      tf.logging.info('Starting to predict.')
+      try:
+        predict_results = predict_estimator.predict(
+            input_fn=dataloader.InputReader(
+                FLAGS.validation_file_pattern, is_training=False),
+            steps=FLAGS.predict_samples // FLAGS.predict_batch_size)
+        tf.logging.info('predict results: %s' % predict_results)
+
+        # Terminate predict job when final checkpoint is reached
+        current_step = int(os.path.basename(ckpt).split('-')[1])
+        total_step = int((FLAGS.num_epochs * FLAGS.num_examples_per_epoch) /
+                         FLAGS.train_batch_size)
+        if current_step >= total_step:
+          tf.logging.info(
+              'predictuation finished after training step %d' % current_step)
+          break
+        predict_estimator.export_saved_model(
+            export_dir_base=FLAGS.model_dir,
+            serving_input_receiver_fn=
+            lambda: serving_input_fn(hparams.image_size))
+
       except tf.errors.NotFoundError:
         # Since the coordinator is on a different job than the TPU worker,
         # sometimes the TPU worker does not finish initializing until long after
