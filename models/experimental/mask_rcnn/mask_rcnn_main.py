@@ -133,6 +133,45 @@ def evaluation(eval_estimator, config):
 
   return eval_results
 
+def predict(predict_estimator, config):
+  """Runs one prediction."""
+  predictor = predict_estimator.predict(
+      input_fn=dataloader.InputReader(
+          config.validation_file_pattern,
+          mode=tf.estimator.ModeKeys.PREDICT,
+          num_examples=config.eval_samples,
+          use_instance_mask=config.include_mask),
+      yield_single_examples=False)
+  # Every predictor.next() gets a batch of prediction (a dictionary).
+  predictions = dict()
+  assert config.eval_samples // config.eval_batch_size > 0, (
+      'config.eval_samples'
+      ' >= '
+      'config.eval_batch_size')
+  for _ in range(config.eval_samples // config.eval_batch_size):
+    prediction = six.next(predictor)
+    image_info = prediction['image_info']
+    raw_detections = prediction['detections']
+    processed_detections = raw_detections
+    for b in range(raw_detections.shape[0]):
+      scale = image_info[b][2]
+      for box_id in range(raw_detections.shape[1]):
+        # Map [y1, x1, y2, x2] -> [x1, y1, w, h] and multiply detections
+        # by image scale.
+        new_box = raw_detections[b, box_id, :]
+        y1, x1, y2, x2 = new_box[1:5]
+        new_box[1:5] = scale * np.array([x1, y1, x2 - x1, y2 - y1])
+        processed_detections[b, box_id, :] = new_box
+    prediction['detections'] = processed_detections
+
+    for k, v in six.iteritems(prediction):
+      if k not in predictions:
+        predictions[k] = v
+      else:
+        predictions[k] = np.append(predictions[k], v, axis=0)
+
+  return predictions
+
 
 def write_summary(eval_results, summary_writer, current_step):
   """Write out eval results for the checkpoint."""
@@ -369,6 +408,71 @@ def main(argv):
             dataloader.serving_input_fn,
             batch_size=1,
             image_size=config.image_size))
+
+  elif FLAGS.mode == 'predict':
+    output_dir = os.path.join(FLAGS.model_dir, 'predict')
+    tf.gfile.MakeDirs(output_dir)
+    # Summary writer writes out eval metrics.
+    summary_writer = tf.summary.FileWriter(output_dir)
+
+    predict_params_dict = dict(
+        params,
+        use_tpu=False,
+        input_rand_hflip=False,
+        is_training_bn=False,
+        transpose_input=False,
+    )
+
+    predict_estimator = tf.contrib.tpu.TPUEstimator(
+        model_fn=mask_rcnn_model.mask_rcnn_model_fn,
+        use_tpu=FLAGS.use_tpu,
+        train_batch_size=config.train_batch_size,
+        eval_batch_size=config.eval_batch_size,
+        predict_batch_size=config.eval_batch_size,
+        config=run_config,
+        params=predict_params_dict)
+
+    def terminate_predict():
+      tf.logging.info('Terminating predict after %d seconds of no checkpoints' %
+                      FLAGS.predict_timeout)
+      return True
+
+    # Run predictions when there's a new checkpoint
+    for ckpt in tf.contrib.training.checkpoints_iterator(
+        FLAGS.model_dir,
+        min_interval_secs=FLAGS.min_eval_interval,
+        timeout=FLAGS.eval_timeout,
+        timeout_fn=terminate_predict):
+      # Terminate eval job when final checkpoint is reached
+      current_step = int(os.path.basename(ckpt).split('-')[1])
+
+      tf.logging.info('Starting to predict.')
+      try:
+        predict_results = predict(predict_estimator, config)
+        write_summary(predict_results, summary_writer, current_step)
+
+        if current_step >= config.total_steps:
+          tf.logging.info('Prediction finished after training step %d' %
+                          current_step)
+          break
+
+      except tf.errors.NotFoundError:
+        # Since the coordinator is on a different job than the TPU worker,
+        # sometimes the TPU worker does not finish initializing until long after
+        # the CPU job tells it to start evaluating. In this case, the checkpoint
+        # file could have been deleted already.
+        tf.logging.info('Checkpoint %s no longer exists, skipping checkpoint' %
+                        ckpt)
+    summary_writer.close()
+
+    # Export saved model.
+    predict_estimator.export_saved_model(
+        export_dir_base=FLAGS.model_dir,
+        serving_input_receiver_fn=functools.partial(
+            dataloader.serving_input_fn,
+            batch_size=1,
+            image_size=config.image_size))
+
 
   elif FLAGS.mode == 'train_and_eval':
     if FLAGS.model_dir:
