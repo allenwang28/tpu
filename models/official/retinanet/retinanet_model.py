@@ -381,8 +381,15 @@ def _model_fn(features, labels, mode, params, model, variable_filter_fn=None):
     return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
   # Load pretrained model from checkpoint.
-  if params['resnet_checkpoint'] and mode == tf.estimator.ModeKeys.TRAIN:
+  if params['transfer_checkpoint'] and mode == tf.estimator.ModeKeys.TRAIN:
+    def scaffold_fn():
+      """Loads pretrained model through scaffold function."""
+      tf.train.init_from_checkpoint(params['transfer_checkpoint'], {
+          '/': '/',
+        })
+      return tf.train.Scaffold()
 
+  elif params['resnet_checkpoint'] and mode == tf.estimator.ModeKeys.TRAIN:
     def scaffold_fn():
       """Loads pretrained model through scaffold function."""
       tf.train.init_from_checkpoint(params['resnet_checkpoint'], {
