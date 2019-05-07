@@ -64,7 +64,7 @@ flags.DEFINE_string(
     'resnet_checkpoint', '',
     'Location of the ResNet50 checkpoint to use for model '
     'initialization.')
-flags.DEFINE_STRING(
+flags.DEFINE_string(
     'transfer_checkpoint', '',
     'Location of the RetinaNet checkpoint to use for model '
     'initialization.')
@@ -215,6 +215,7 @@ def main(argv):
       num_examples_per_epoch=FLAGS.num_examples_per_epoch,
       use_tpu=FLAGS.use_tpu,
       resnet_checkpoint=FLAGS.resnet_checkpoint,
+      transfer_checkpoint=FLAGS.transfer_checkpoint,
       val_json_file=FLAGS.val_json_file,
       mode=FLAGS.mode,
   )

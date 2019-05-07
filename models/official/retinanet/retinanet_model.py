@@ -385,7 +385,7 @@ def _model_fn(features, labels, mode, params, model, variable_filter_fn=None):
     def scaffold_fn():
       """Loads pretrained model through scaffold function."""
       tf.train.init_from_checkpoint(params['transfer_checkpoint'], {
-          '/': '/',
+          '/': 't/',
         })
       return tf.train.Scaffold()
 
