@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+import re
 import time
 
 from absl import app
@@ -407,27 +408,16 @@ def resnet_model_fn(features, labels, mode, params):
     # Batch normalization requires UPDATE_OPS to be added as a dependency to
     # the train operation.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    def _dense_grad_filter(gvs):
-      """Only apply gradient updates to the final layer.
-      This function is used for fine tuning.
-      Args:
-        gvs: list of tuples with gradients and variable info
-      Returns:
-        filtered gradients so that only the dense layer remains
-      """
-      return [(g, v) for g, v in gvs if 'dense' in v.name]
-
-
     with tf.control_dependencies(update_ops):
       if params['fine_tune']:
         train_op = optimizer.minimize(loss,
                                       global_step,
-                                      var_list=_dense_grad_filter(tf.GraphKeys.trainable_variables))
+                                      var_list=tf.trainable_variables(scope=r'dense'))
       else:
         train_op = optimizer.minimize(loss, global_step)
 
     if not params['skip_host_call']:
-      def host_call_fn(gs, loss, lr, ce):
+      def host_call_fn(gs, loss, lr, ce, conv, dense):
         """Training host call. Creates scalar summaries for training metrics.
 
         This function is executed on the CPU and should not directly reference
@@ -460,6 +450,8 @@ def resnet_model_fn(features, labels, mode, params):
             summary.scalar('loss', loss[0], step=gs)
             summary.scalar('learning_rate', lr[0], step=gs)
             summary.scalar('current_epoch', ce[0], step=gs)
+            summary.histogram('conv2d_hist', conv, step=gs)
+            summary.histogram('dense_hist', dense, step=gs)
 
             return summary.all_summary_ops()
 
@@ -472,8 +464,10 @@ def resnet_model_fn(features, labels, mode, params):
       loss_t = tf.reshape(loss, [1])
       lr_t = tf.reshape(learning_rate, [1])
       ce_t = tf.reshape(current_epoch, [1])
+      conv = tf.trainable_variables('conv2d')[0]
+      dense = tf.trainable_variables('dense')[0]
 
-      host_call = (host_call_fn, [gs_t, loss_t, lr_t, ce_t])
+      host_call = (host_call_fn, [gs_t, loss_t, lr_t, ce_t, conv, dense])
 
   else:
     train_op = None
