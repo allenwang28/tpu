@@ -25,3 +25,4 @@ dropblock_groups: ''
 dropblock_keep_prob: 0.9
 dropblock_size: 7
 data_format: 'channels_last'
+fine_tune: True

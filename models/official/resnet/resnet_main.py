@@ -100,6 +100,10 @@ flags.DEFINE_bool(
     help='Use TPU double transpose optimization')
 
 flags.DEFINE_bool(
+    'fine_tune', default=None,
+    help='Freeze all layers, only train the final dense layer.')
+
+flags.DEFINE_bool(
     'use_cache', default=None, help=('Enable cache for training input.'))
 
 flags.DEFINE_integer('image_size', None, 'The input image size.')
@@ -403,8 +407,24 @@ def resnet_model_fn(features, labels, mode, params):
     # Batch normalization requires UPDATE_OPS to be added as a dependency to
     # the train operation.
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    def _dense_grad_filter(gvs):
+      """Only apply gradient updates to the final layer.
+      This function is used for fine tuning.
+      Args:
+        gvs: list of tuples with gradients and variable info
+      Returns:
+        filtered gradients so that only the dense layer remains
+      """
+      return [(g, v) for g, v in gvs if 'dense' in v.name]
+
+
     with tf.control_dependencies(update_ops):
-      train_op = optimizer.minimize(loss, global_step)
+      if params['fine_tune']:
+        train_op = optimizer.minimize(loss,
+                                      global_step,
+                                      var_list=_dense_grad_filter(tf.GraphKeys.trainable_variables))
+      else:
+        train_op = optimizer.minimize(loss, global_step)
 
     if not params['skip_host_call']:
       def host_call_fn(gs, loss, lr, ce):
