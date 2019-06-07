@@ -3,7 +3,7 @@ train_batch_size: 1024
 eval_batch_size: 1024
 num_train_images: 1281167
 num_eval_images: 50000
-train_steps: 10000
+train_steps: 112590
 base_learning_rate: 0.1
 iterations_per_loop: 1251
 use_tpu: True
