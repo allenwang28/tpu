@@ -66,10 +66,14 @@ def poly_rate_schedule(current_epoch,
   min_step = tf.constant(1, dtype=tf.int64)
   global_step = tf.train.get_or_create_global_step()
   decay_steps = tf.maximum(min_step, tf.subtract(global_step, w_steps))
+  if not params['lars_end_steps']:
+    lars_end_steps = params['train_steps']
+  else:
+    lars_end_steps = params['lars_end_steps']
   poly_rate = tf.train.polynomial_decay(
       plr,
       decay_steps,
-      params['train_steps'] - w_steps + 1,
+      lars_end_steps - w_steps + 1,
       power=2.0)
   decay_rate = tf.where(current_epoch <= w_epochs, wrate, poly_rate)
   return decay_rate
@@ -84,4 +88,4 @@ def init_lars_optimizer(current_epoch, params):
       momentum=params['momentum'],
       weight_decay=params['weight_decay'],
       skip_list=['batch_normalization', 'bias'])
-  return optimizer
+  return optimizer, learning_rate
