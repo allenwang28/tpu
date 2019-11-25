@@ -110,7 +110,7 @@ class ImageNetTFExampleInput(object):
   def set_shapes(self, batch_size, images, labels):
     """Statically set the batch_size dimension."""
     if self.transpose_input:
-      if FLAGS.train_batch_size // FLAGS.num_cores > 8:
+      if batch_size // self.num_cores > 8:
         shape = [None, None, None, batch_size]
       else:
         shape = [None, None, batch_size, None]
@@ -204,21 +204,6 @@ class ImageNetTFExampleInput(object):
         image_size=self.image_size,
         use_bfloat16=self.use_bfloat16), label
 
-  def pad_dataset(self, dataset, num_hosts):
-    """Pad the eval dataset so that eval can have the same batch size as training."""
-    num_dataset_per_shard = int(
-        math.ceil(FLAGS.num_eval_images / FLAGS.eval_batch_size) *
-        FLAGS.eval_batch_size / num_hosts)
-    example_string = 'dummy_string'
-    padded_example = _convert_to_example(
-        str.encode(example_string), -1).SerializeToString()
-    padded_dataset = tf.data.Dataset.from_tensors(
-        tf.constant(padded_example, dtype=tf.string))
-    padded_dataset = padded_dataset.repeat(num_dataset_per_shard)
-
-    dataset = dataset.concatenate(padded_dataset).take(num_dataset_per_shard)
-    return dataset
-
   @abc.abstractmethod
   def make_source_dataset(self, index, num_hosts):
     """Makes dataset of serialized TFExamples.
@@ -267,10 +252,6 @@ class ImageNetTFExampleInput(object):
 
     dataset = self.make_source_dataset(current_host, num_hosts)
 
-    if not self.is_training:
-      # Padding for eval.
-      dataset = self.pad_dataset(dataset, num_hosts)
-
     # Use the fused map-and-batch operation.
     #
     # For XLA, we must used fixed shapes. Because we repeat the source training
@@ -298,7 +279,7 @@ class ImageNetTFExampleInput(object):
 
     # Transpose for performance on TPU
     if self.transpose_input:
-      if FLAGS.train_batch_size // FLAGS.num_cores > 8:
+      if batch_size // self.num_cores > 8:
         transpose_array = [1, 2, 3, 0]
       else:
         transpose_array = [1, 2, 0, 3]
