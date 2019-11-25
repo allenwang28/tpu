@@ -200,6 +200,9 @@ flags.DEFINE_string('model_name', 'resnet',
 flags.DEFINE_multi_integer(
     'inference_batch_sizes', [8],
     'Known inference batch sizes used to warm up for each core.')
+flags.DEFINE_bool(
+    'cache_decoded_image', False,
+    'Whether or not to cache the decoded image.')
 
 
 # The input tensor is in the range of [0, 255], we need to scale them to the

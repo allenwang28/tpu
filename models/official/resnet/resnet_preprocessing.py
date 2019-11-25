@@ -17,10 +17,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from absl import flags
 import tensorflow as tf
 
 IMAGE_SIZE = 224
 CROP_PADDING = 32
+
+FLAGS = flags.FLAGS
 
 
 def distorted_bounding_box_crop(image_bytes,
@@ -55,7 +58,10 @@ def distorted_bounding_box_crop(image_bytes,
     cropped image `Tensor`
   """
   with tf.name_scope(scope, 'distorted_bounding_box_crop', [image_bytes, bbox]):
-    shape = tf.image.extract_jpeg_shape(image_bytes)
+    if FLAGS.cache_decoded_image:
+      shape = tf.shape(image_bytes)
+    else:
+      shape = tf.image.extract_jpeg_shape(image_bytes)
     sample_distorted_bounding_box = tf.image.sample_distorted_bounding_box(
         shape,
         bounding_boxes=bbox,
@@ -70,7 +76,12 @@ def distorted_bounding_box_crop(image_bytes,
     offset_y, offset_x, _ = tf.unstack(bbox_begin)
     target_height, target_width, _ = tf.unstack(bbox_size)
     crop_window = tf.stack([offset_y, offset_x, target_height, target_width])
-    image = tf.image.decode_and_crop_jpeg(image_bytes, crop_window, channels=3)
+    if FLAGS.cache_decoded_image:
+      image = tf.image.crop_to_bounding_box(image_bytes, offset_y, offset_x,
+                                            target_height, target_width)
+    else:
+      image = tf.image.decode_and_crop_jpeg(
+          image_bytes, crop_window, channels=3)
 
     return image
 
@@ -93,16 +104,7 @@ def _decode_and_random_crop(image_bytes, image_size):
       area_range=(0.08, 1.0),
       max_attempts=10,
       scope=None)
-  original_shape = tf.image.extract_jpeg_shape(image_bytes)
-  bad = _at_least_x_are_equal(original_shape, tf.shape(image), 3)
-
-  image = tf.cond(
-      bad,
-      lambda: _decode_and_center_crop(image_bytes, image_size),
-      lambda: tf.image.resize_bicubic([image],  # pylint: disable=g-long-lambda
-                                      [image_size, image_size])[0])
-
-  return image
+  return tf.image.resize_bicubic([image], [image_size, image_size])[0]
 
 
 def _decode_and_center_crop(image_bytes, image_size):
@@ -169,8 +171,10 @@ def preprocess_for_eval(image_bytes, use_bfloat16, image_size=IMAGE_SIZE):
   return image
 
 
-def preprocess_image(image_bytes, is_training=False, use_bfloat16=False,
-      image_size=IMAGE_SIZE):
+def preprocess_image(image_bytes,
+                     is_training=False,
+                     use_bfloat16=False,
+                     image_size=IMAGE_SIZE):
   """Preprocesses the given image.
 
   Args:
